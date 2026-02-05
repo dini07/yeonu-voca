@@ -2,7 +2,7 @@ import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-from gtts import gTTS
+# gTTS 등은 필요 없지만 에러 방지용 import
 import io
 import requests
 from fpdf import FPDF
@@ -16,27 +16,21 @@ st.set_page_config(page_title="연우의 단어장", page_icon="📖", layout="w
 st.title("📖 연우의 단어장")
 
 # --- 2. 비밀 정보(Secrets) 가져오기 ---
-# 로컬(내 컴퓨터)과 클라우드(Streamlit Cloud) 환경을 모두 지원하도록 설정
 GEMINI_API_KEY = None
 try:
     if "GEMINI_API_KEY" in st.secrets:
         GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except FileNotFoundError:
-    # 로컬 테스트용: secrets.toml 파일이 없으면 코드에 적힌 키 사용 (테스트 할 때만 사용하세요)
-    # GitHub에 올릴 때는 이 부분을 비워두거나 주의해야 합니다.
     GEMINI_API_KEY = "AIzaSyAfXO1BT9fz9Au-WkaMEPWIDIOhFbJ2pF4" 
 
-# --- 3. 구글 시트 연결 (보안 강화) ---
+# --- 3. 구글 시트 연결 ---
 @st.cache_resource
 def get_google_sheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # 1. Streamlit Cloud 배포 환경 (Secrets 사용)
     if "gcp_service_account" in st.secrets:
         creds_dict = st.secrets["gcp_service_account"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    
-    # 2. 내 컴퓨터 로컬 환경 (파일 사용)
     else:
         try:
             creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
@@ -46,13 +40,11 @@ def get_google_sheet_client():
             
     return gspread.authorize(creds)
 
-# --- [핵심 변경] 4. 오디오 생성 (브라우저 내장 음성 사용) ---
-# 서버에서 파일을 만들지 않고, 자바스크립트로 폰에게 직접 명령합니다.
+# --- 4. 오디오 생성 (버튼 스타일 수정) ---
 def get_audio_html(word):
-    # 자바스크립트 코드: 단어를 받아서 브라우저의 TTS(Text-to-Speech)로 읽어줌
-    # escape 처리를 위해 단어 내의 따옴표 등을 정리
     safe_word = word.replace("'", "").replace('"', "")
     
+    # 버튼 디자인을 '이모지' 느낌으로 작고 깔끔하게 수정했습니다.
     html_code = f"""
     <html>
     <body>
@@ -60,24 +52,24 @@ def get_audio_html(word):
             function speak_{safe_word.replace(" ", "_")}() {{
                 const msg = new SpeechSynthesisUtterance();
                 msg.text = "{safe_word}";
-                msg.lang = "en-US"; // 영어 발음 설정
-                msg.rate = 0.8; // 속도 (1.0이 기본, 0.8은 약간 천천히 또박또박)
+                msg.lang = "en-US";
+                msg.rate = 0.8;
                 window.speechSynthesis.speak(msg);
             }}
         </script>
         <button onclick="speak_{safe_word.replace(" ", "_")}()" style="
-            background-color: #4CAF50; 
-            border: none; 
-            color: white; 
-            padding: 5px 15px; 
+            background-color: transparent; 
+            border: 1px solid #ddd; 
+            color: #333; 
+            padding: 2px 8px; 
             text-align: center; 
-            text-decoration: none; 
             display: inline-block; 
-            font-size: 14px; 
-            margin: 2px 1px; 
+            font-size: 18px; 
+            margin: 0px; 
             cursor: pointer; 
-            border-radius: 12px;">
-            🔊 듣기
+            border-radius: 50%;
+            line-height: 1.5;">
+            🔊
         </button>
     </body>
     </html>
@@ -103,7 +95,7 @@ def get_dictionary_data(word):
         else: return None, None
     except: return None, None
 
-# --- 6. Gemini 설정 (모델 2.5 고정) ---
+# --- 6. Gemini 설정 ---
 def get_gemini_model():
     if not GEMINI_API_KEY: return None
     try:
@@ -116,13 +108,9 @@ def get_gemini_model():
             return None
 
 def generate_ai_tips_batch(word_list):
-    """
-    10개씩 묶어서 질문하고 JSON으로 결과를 받는 함수
-    """
     model = get_gemini_model()
     if not model: return {}
 
-    # 질문할 단어 목록 텍스트 변환
     words_str = ""
     for item in word_list:
         words_str += f"- {item['word']} (뜻: {item['meaning']})\n"
@@ -152,14 +140,10 @@ def generate_ai_tips_batch(word_list):
             "run": "👉 운동장이나 급할 때 써요! jog보다는 더 빨리 뛰는 느낌이에요. Ex) Run fast!"
         }}
         """
-        
         response = model.generate_content(prompt)
         text_response = response.text.strip()
-        
-        # 마크다운 제거
         if text_response.startswith("```json"):
             text_response = text_response.replace("```json", "").replace("```", "")
-        
         result_dict = json.loads(text_response)
         return result_dict
 
@@ -170,16 +154,14 @@ def generate_ai_tips_batch(word_list):
 # --- 7. PDF 생성 ---
 def create_quiz_pdf(df, week_name):
     pdf = FPDF()
-    # [중요] 폰트 파일이 같은 폴더에 있어야 함
     font_path = "NanumGothic-Bold.ttf"
     try: pdf.add_font("NanumGothic", style="", fname=font_path)
     except: 
-        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요! GitHub에 같이 올렸는지 확인해주세요.")
+        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요!")
         return None
 
     pdf.set_font("NanumGothic", size=12)
 
-    # 1~5페이지
     for i in range(1, 6):
         pdf.add_page()
         pdf.set_font("NanumGothic", size=16)
@@ -205,7 +187,6 @@ def create_quiz_pdf(df, week_name):
             pdf.cell(95, 12, "" if quiz_type == 1 else meaning, border=1, align="L")
             pdf.ln()
 
-    # 6페이지
     pdf.add_page()
     pdf.set_font("NanumGothic", size=16)
     pdf.cell(0, 15, f"최종 확인 학습 (전체 단어) - {week_name}", align="C", new_x="LMARGIN", new_y="NEXT")
@@ -231,13 +212,13 @@ def create_quiz_pdf(df, week_name):
 # --- 메인 로직 ---
 try:
     client = get_google_sheet_client()
-    if not client: st.stop() # 연결 실패 시 중단
+    if not client: st.stop()
     
     spreadsheet_name = "GLP_words"
     doc = client.open(spreadsheet_name)
 except Exception as e:
     st.error(f"구글 시트 연결 실패: {e}")
-    st.info("💡 팁: 로컬에서는 'service_account.json' 파일이 필요하고, Streamlit Cloud에서는 Secrets 설정이 필요합니다.")
+    st.info("💡 Secrets 또는 service_account.json을 확인하세요.")
     st.stop()
 
 with st.sidebar:
@@ -254,7 +235,6 @@ try:
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     
-    # 데이터 청소
     df = df.fillna("") 
     if 'Context' not in df.columns: df['Context'] = ""
 
@@ -267,10 +247,9 @@ try:
             # === AI 꿀팁 생성 버튼 ===
             if st.button("✨ AI 쌤에게 꿀팁 채워달라고 하기 (빈칸만)"):
                 if not GEMINI_API_KEY or "API_키" in GEMINI_API_KEY:
-                    st.error("⚠️ API 키가 설정되지 않았습니다. (Secrets 설정을 확인하세요)")
+                    st.error("⚠️ API 키가 설정되지 않았습니다.")
                 else:
                     progress_bar = st.progress(0, text="작업 대상을 찾고 있어요...")
-                    
                     target_rows = []
                     for index, row in df.iterrows():
                         raw_context = row.get('Context', '')
@@ -286,29 +265,22 @@ try:
                         st.success("이미 모든 단어에 설명이 적혀있어요! 👍")
                     else:
                         st.info(f"총 {len(target_rows)}개의 단어에 설명을 채울 예정입니다. (10개씩 묶어서 처리)")
-                        
                         batch_size = 10
                         total_processed = 0
                         
                         for i in range(0, len(target_rows), batch_size):
                             batch = target_rows[i : i + batch_size]
-                            progress_bar.progress((i) / len(target_rows), text=f"AI가 {i+1}~{i+len(batch)}번째 단어를 생각 중입니다...")
+                            progress_bar.progress((i) / len(target_rows), text=f"AI가 생각 중... ({i+1}~{i+len(batch)})")
                             
                             batch_response = generate_ai_tips_batch(batch)
                             
                             for item in batch:
-                                word_key = item['word']
-                                if word_key in batch_response:
-                                    explanation = batch_response[word_key]
+                                if item['word'] in batch_response:
                                     try:
-                                        # D열(4번째)에 업데이트
-                                        sheet.update_cell(item['index'] + 2, 4, explanation)
+                                        sheet.update_cell(item['index'] + 2, 4, batch_response[item['word']])
                                         total_processed += 1
                                     except Exception as e:
                                         print(f"저장 실패: {e}")
-                                else:
-                                    print(f"AI 응답 누락: {word_key}")
-                            
                             time.sleep(1)
 
                         progress_bar.empty()
@@ -318,42 +290,60 @@ try:
 
             st.info("💡 단어를 클릭하고 설명을 읽어보세요!")
             
-            my_bar = st.progress(0, text="단어 정보를 불러오는 중...")
+            my_bar = st.progress(0, text="로딩 중...")
             total_words = len(df)
 
+            # =========================================================
+            # 👇 [UI 수정됨] 단어 표시 부분 
+            # =========================================================
             for index, row in df.iterrows():
                 my_bar.progress((index + 1) / total_words)
                 
                 word = str(row['Word'])
                 kor_meaning = row['Meaning']
                 context_tip = str(row.get('Context', ''))
-                
                 eng_def, eng_ex = get_dictionary_data(word)
 
+                # 1. 단어 카드 컨테이너
                 with st.container():
-                    col1, col2 = st.columns([1, 2])
-                    with col1:
-                        st.subheader(f"{index + 1}. {word}")
-                        # [오디오 재생] HTML + JS 방식 (초록색 버튼)
+                    # 3개의 컬럼으로 분할 (단어 / 오디오 / 한글뜻)
+                    # 비율 조절: [단어(2), 오디오(0.5), 한글뜻(4)]
+                    c1, c2, c3 = st.columns([1.5, 0.5, 4])
+                    
+                    with c1:
+                        # 영어 단어 (크게)
+                        st.markdown(f"#### **{index + 1}. {word}**")
+                    
+                    with c2:
+                        # 오디오 버튼 (단어 바로 옆)
                         audio_html = get_audio_html(word)
-                        # 높이를 지정해줘서 레이아웃 깨짐 방지
-                        st.components.v1.html(audio_html, height=40)
-                        
-                    with col2:
-                        st.markdown(f"🇰🇷 **{kor_meaning}**")
-                        
-                        if context_tip and context_tip.lower() != 'nan':
-                            st.info(f"{context_tip}")
-                        
-                        if eng_def:
-                            st.markdown(f"🇺🇸 *{eng_def}*")
-                            if eng_ex: st.caption(f"ex) {eng_ex}")
-                    st.markdown("---")
+                        # components.html을 쓰면 iframe이라 높이 조절 필요
+                        st.components.v1.html(audio_html, height=35)
+                    
+                    with c3:
+                         # 한글 뜻 (수직 중앙 정렬 느낌을 위해 마크다운 사용)
+                        st.markdown(f"#### :blue[{kor_meaning}]")
+
+                    # 2. 영영사전 뜻 (아래쪽에 살짝 들여쓰기)
+                    if eng_def:
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ 🇺🇸 *{eng_def}*")
+                        if eng_ex:
+                            st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ex) {eng_ex}")
+
+                    # 3. AI 꿀팁 (접이식 박스 - Expander)
+                    # 내용이 있을 때만 표시
+                    if context_tip and context_tip.lower() != 'nan':
+                        # 'expanded=False'는 기본적으로 닫혀있게 함
+                        with st.expander("💡 AI 쌤의 꿀팁 보기 (클릭)", expanded=False):
+                            st.info(context_tip)
+
+                # 구분선
+                st.markdown("---")
+            
             my_bar.empty()
 
         with tab2:
             st.header("📝 랜덤 테스트지 생성")
-            st.write("마지막 장은 전체 단어 쓰기 테스트입니다.")
             if st.button("🚀 시험지 PDF 만들기"):
                 with st.spinner("PDF 생성 중..."):
                     pdf_data = create_quiz_pdf(df, selected_tab)
