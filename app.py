@@ -312,7 +312,7 @@ try:
                     with col1:
                         st.subheader(f"{index + 1}. {word}")
                         
-                        audio = get_audio_html(word)
+                        audio_html = get_audio_html(word)
                         # if audio: st.audio(audio, format='audio/mp3')
                         st.markdown(audio_html, unsafe_allow_html=True)
                     with col2:
