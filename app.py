@@ -9,6 +9,7 @@ from fpdf import FPDF
 import random
 import time
 import google.generativeai as genai
+import json # [NEW] JSON 처리를 위한 모듈 추가
 
 # ==========================================
 # 👇 [필수] API 키 입력
@@ -56,13 +57,11 @@ def get_dictionary_data(word):
         else: return None, None
     except: return None, None
 
-# --- 5. Gemini 설정 및 생성 ---
-# (모델을 전역 변수로 두지 않고 함수 안에서 호출하도록 변경)
+# --- 5. Gemini 설정 및 생성 (배치 처리로 변경) ---
 def get_gemini_model():
     if not GEMINI_API_KEY: return None
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        # 1순위: 최신 플래시 모델
+                # 1순위: 최신 플래시 모델
         return genai.GenerativeModel('gemini-2.5-flash')
     except:
         try:
@@ -71,24 +70,59 @@ def get_gemini_model():
         except:
             return None
 
-def generate_ai_tip(word, meaning):
+# [NEW] 10개씩 묶어서 질문하는 함수
+def generate_ai_tips_batch(word_list):
+    """
+    word_list 예시: [{'word': 'apple', 'meaning': '사과'}, {'word': 'run', 'meaning': '달리다'} ...]
+    """
     model = get_gemini_model()
-    if not model: return None
+    if not model: return {}
+
+    # 질문할 단어 목록을 텍스트로 변환
+    words_str = ""
+    for item in word_list:
+        words_str += f"- {item['word']} (뜻: {item['meaning']})\n"
+
     try:
         prompt = f"""
-        영어 단어 '{word}'(뜻: {meaning})를 중학생 아이가 이해하기 쉽게 설명해줘.
-        영어 단어는 10개씩 줄꺼야. 각각의 단어에 대한 설명을 각각 아래의 규칙에 따라 설명을 만들어주면 돼.
-        1. 이 단어가 실제로 어떤 상황에서 쓰이는지 설명
-        2. 비슷한 단어와는 어떻게 다른지 설명
-        3. 외우기 쉬운 꿀팁을 한국어 한 문장과 예문으로 영어 한 한문장으로 (각각 1문장 씩)
-        4. 말투는 "👉 친구랑 놀 때 자주 사용해요" 처럼 친절하게 해주고, 문장 맨 앞에 '👉' 이모지를 꼭 붙여줘.
+        너는 중학생 영어를 가르치는 친절한 선생님이야.
+        아래 영단어 목록(약 10개)에 대해, 각각 아이가 이해하기 쉬운 설명을 만들어줘.
+
+        [단어 목록]
+        {words_str}
+
+        [설명 작성 규칙]
+        각 단어마다 다음 3가지 내용을 포함해서 하나의 문단으로 자연스럽게 써줘.
+        1. **상황**: 실제로 어떤 상황에서 쓰이는지
+        2. **차이**: 비슷한 단어와 뉘앙스 차이 (없으면 생략 가능)
+        3. **꿀팁**: 외우기 쉬운 팁(한국어) + 예문(영어)
+        4. **말투**: "👉 친구랑 놀 때 자주 써요!" 처럼 친절하게 하고, 문장 맨 앞에 '👉' 이모지를 붙여줘.
+
+        [중요: 출력 형식]
+        반드시 **JSON 형식**으로만 출력해. 다른 말은 하지 마.
+        Key는 '영어단어', Value는 '설명내용'이어야 해.
+        예시:
+        {{
+            "apple": "👉 과일 가게나 간식 시간에 자주 써요! 빨간 사과를 떠올려보세요. Ex) I eat an apple.",
+            "run": "👉 운동장이나 급할 때 써요! jog보다는 더 빨리 뛰는 느낌이에요. Ex) Run fast!"
+        }}
         """
+        
+        # API 호출
         response = model.generate_content(prompt)
-        return response.text.strip()
+        text_response = response.text.strip()
+        
+        # 혹시 ```json ... ``` 같은 마크다운이 붙어있으면 제거
+        if text_response.startswith("```json"):
+            text_response = text_response.replace("```json", "").replace("```", "")
+        
+        # JSON 문자열을 파이썬 딕셔너리로 변환
+        result_dict = json.loads(text_response)
+        return result_dict
+
     except Exception as e:
-        # 에러 내용을 터미널에 출력
-        print(f"AI Error: {e}")
-        return None
+        print(f"AI Batch Error: {e}")
+        return {} # 실패하면 빈 딕셔너리 반환
 
 # --- 6. PDF 생성 ---
 def create_quiz_pdf(df, week_name):
@@ -168,7 +202,7 @@ with st.sidebar:
         st.markdown("**Created for Yeonu.ko.**")
         
         st.markdown("---")
-        # [NEW] 모델 확인용 버튼
+        # 모델 확인용 버튼
         if st.button("🤖 내 모델 목록 확인"):
             try:
                 genai.configure(api_key=GEMINI_API_KEY)
@@ -196,40 +230,68 @@ try:
         tab1, tab2 = st.tabs(["📚 단어 공부하기", "🖨️ 시험지 만들기"])
 
         with tab1:
+            # === [수정됨] 10개씩 묶어서 처리하는 로직 ===
             if st.button("✨ AI 쌤에게 꿀팁 채워달라고 하기 (빈칸만)"):
                 if not GEMINI_API_KEY:
                     st.error("⚠️ API 키가 없어요.")
                 else:
-                    progress_bar = st.progress(0, text="AI가 설명을 쓰고 있어요...")
-                    count = 0
-                    total = len(df)
+                    progress_bar = st.progress(0, text="작업 대상을 찾고 있어요...")
                     
+                    # 1. 작업해야 할 빈칸(Target) 찾기
+                    target_rows = []
                     for index, row in df.iterrows():
                         raw_context = row.get('Context', '')
                         current_context = str(raw_context).strip()
                         
+                        # 내용이 없거나 'nan'인 경우만 리스트에 추가
                         if not current_context or current_context.lower() == 'nan':
-                            word = row['Word']
-                            meaning = row['Meaning']
-                            
-                            ai_tip = generate_ai_tip(word, meaning)
-                            
-                            if ai_tip:
-                                try:
-                                    # [중요] 4번째 열(D열)에 저장!
-                                    sheet.update_cell(index + 2, 4, ai_tip) 
-                                    count += 1
-                                except Exception as e:
-                                    st.warning(f"저장 실패 ({word}): {e}")
-                            
-                            time.sleep(1)
-                        
-                        progress_bar.progress((index + 1) / total)
+                            target_rows.append({
+                                'index': index, # 데이터프레임 인덱스
+                                'word': row['Word'],
+                                'meaning': row['Meaning']
+                            })
                     
-                    progress_bar.empty()
-                    st.success(f"완료! {count}개의 꿀팁을 새로 적었어요.")
-                    time.sleep(2)
-                    st.rerun()
+                    if not target_rows:
+                        st.success("이미 모든 단어에 설명이 적혀있어요! 👍")
+                    else:
+                        st.info(f"총 {len(target_rows)}개의 단어에 설명을 채울 예정입니다. (10개씩 묶어서 처리)")
+                        
+                        # 2. 10개씩 잘라서(Chunk) 처리하기
+                        batch_size = 10
+                        total_processed = 0
+                        
+                        for i in range(0, len(target_rows), batch_size):
+                            # 이번에 처리할 묶음 (최대 10개)
+                            batch = target_rows[i : i + batch_size]
+                            
+                            progress_bar.progress((i) / len(target_rows), text=f"AI가 {i+1}~{i+len(batch)}번째 단어를 생각 중입니다...")
+                            
+                            # AI에게 묶음 질문 던지기
+                            # word_list만 뽑아서 전달
+                            batch_response = generate_ai_tips_batch(batch)
+                            
+                            # 응답받은 내용을 시트에 쓰기
+                            for item in batch:
+                                word_key = item['word']
+                                # AI 응답에 해당 단어가 있으면 저장
+                                if word_key in batch_response:
+                                    explanation = batch_response[word_key]
+                                    try:
+                                        # 구글 시트 D열(4번째)에 업데이트
+                                        sheet.update_cell(item['index'] + 2, 4, explanation)
+                                        total_processed += 1
+                                    except Exception as e:
+                                        print(f"저장 실패: {e}")
+                                else:
+                                    print(f"AI 응답 누락: {word_key}")
+                            
+                            # 묶음 처리 후 1초 휴식 (너무 빠르면 차단될 수 있음)
+                            time.sleep(1)
+
+                        progress_bar.empty()
+                        st.success(f"완료! 총 {total_processed}개의 설명을 새로 적었습니다.")
+                        time.sleep(2)
+                        st.rerun()
 
             st.info("💡 단어를 클릭하고 설명을 읽어보세요!")
             
