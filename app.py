@@ -47,15 +47,19 @@ def get_google_sheet_client():
     return gspread.authorize(creds)
 
 # --- 4. 오디오 생성 ---
-@st.cache_data(show_spinner=False)
-def get_audio_bytes(word):
-    try:
-        time.sleep(0.1) 
-        tts = gTTS(text=word, lang='en')
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        return fp
-    except: return None
+# 서버가 파일을 만드는게 아니라, 브라우저가 직접 재생하는 HTML 코드를 만듭니다.
+def get_audio_html(word):
+    # 구글 번역기의 숨겨진 음성 API 주소 (클라이언트 사이드 재생)
+    audio_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={word}&tl=en&client=tw-ob"
+    
+    # HTML audio 태그 생성
+    html_code = f"""
+        <audio controls style="width: 100%;">
+            <source src="{audio_url}" type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
+    """
+    return html_code
 
 # --- 5. 영영사전 데이터 ---
 @st.cache_data(show_spinner=False)
@@ -109,15 +113,16 @@ def generate_ai_tips_batch(word_list):
         {words_str}
 
         [설명 작성 규칙]
-        각 단어마다 다음 3가지 내용을 포함해서 하나의 문단으로 자연스럽게 써줘.
+        각 단어마다 다음의 내용을 포함해서 자연스럽게 써줘. 
         1. **상황**: 실제로 어떤 상황에서 쓰이는지
         2. **차이**: 비슷한 단어와 뉘앙스 차이 (없으면 생략 가능)
         3. **꿀팁**: 외우기 쉬운 팁(한국어) + 예문(영어)
-        4. **말투**: "👉 친구랑 놀 때 자주 써요!" 처럼 친절하게 하고, 문장 맨 앞에 '👉' 이모지를 붙여줘.
+        4. **말투**: "👉 친구랑 놀 때 자주 써요!" 처럼 친절하게 하고, 문장 맨 앞에 '👉' 이모지를 붙여줘. 👉로 시작하는 문장은 앞의 문장과 줄바꿈 처리를 꼭 해줘.
 
         [중요: 출력 형식]
-        반드시 **JSON 형식**으로만 출력해. 다른 말은 하지 마.
+        반드시 **JSON 형식**으로만 출력해.
         Key는 '영어단어', Value는 '설명내용'이어야 해.
+        이 형식을 꼭 지켜줘.
         예시:
         {{
             "apple": "👉 과일 가게나 간식 시간에 자주 써요! 빨간 사과를 떠올려보세요. Ex) I eat an apple.",
@@ -306,8 +311,10 @@ try:
                     col1, col2 = st.columns([1, 2])
                     with col1:
                         st.subheader(f"{index + 1}. {word}")
-                        audio = get_audio_bytes(word)
-                        if audio: st.audio(audio, format='audio/mp3')
+                        
+                        audio = get_audio_html(word)
+                        # if audio: st.audio(audio, format='audio/mp3')
+                        st.markdown(audio_html, unsafe_allow_html=True)
                     with col2:
                         st.markdown(f"🇰🇷 **{kor_meaning}**")
                         
