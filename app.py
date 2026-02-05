@@ -46,32 +46,43 @@ def get_google_sheet_client():
             
     return gspread.authorize(creds)
 
-# --- 4. 오디오 생성 ---
-# --- [핵심 수정] 4. 오디오 생성 (Base64 임베딩 방식) ---
-# 아이폰 무한 로딩 해결을 위해 오디오 데이터를 페이지 안에 직접 심습니다.
-@st.cache_data(show_spinner=False)
+# --- [핵심 변경] 4. 오디오 생성 (브라우저 내장 음성 사용) ---
+# 서버에서 파일을 만들지 않고, 자바스크립트로 폰에게 직접 명령합니다.
 def get_audio_html(word):
-    try:
-        # 1. 서버에서 gTTS로 오디오 데이터 생성
-        tts = gTTS(text=word, lang='en')
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        fp.seek(0)
-        
-        # 2. 오디오 데이터를 텍스트(Base64)로 변환
-        # 이렇게 하면 '파일 다운로드' 과정이 없어져서 아이폰에서도 바로 재생됩니다.
-        b64 = base64.b64encode(fp.read()).decode()
-        
-        # 3. HTML 태그에 직접 데이터 삽입
-        html_code = f"""
-            <audio controls style="width: 100%;">
-                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-                지원하지 않는 브라우저입니다.
-            </audio>
-        """
-        return html_code
-    except Exception as e:
-        return f"🔊 오디오 오류"
+    # 자바스크립트 코드: 단어를 받아서 브라우저의 TTS(Text-to-Speech)로 읽어줌
+    # escape 처리를 위해 단어 내의 따옴표 등을 정리
+    safe_word = word.replace("'", "").replace('"', "")
+    
+    html_code = f"""
+    <html>
+    <body>
+        <script>
+            function speak_{safe_word.replace(" ", "_")}() {{
+                const msg = new SpeechSynthesisUtterance();
+                msg.text = "{safe_word}";
+                msg.lang = "en-US"; // 영어 발음 설정
+                msg.rate = 0.8; // 속도 (1.0이 기본, 0.8은 약간 천천히 또박또박)
+                window.speechSynthesis.speak(msg);
+            }}
+        </script>
+        <button onclick="speak_{safe_word.replace(" ", "_")}()" style="
+            background-color: #4CAF50; 
+            border: none; 
+            color: white; 
+            padding: 5px 15px; 
+            text-align: center; 
+            text-decoration: none; 
+            display: inline-block; 
+            font-size: 14px; 
+            margin: 2px 1px; 
+            cursor: pointer; 
+            border-radius: 12px;">
+            🔊 듣기
+        </button>
+    </body>
+    </html>
+    """
+    return html_code
 
 # --- 5. 영영사전 데이터 ---
 @st.cache_data(show_spinner=False)
@@ -323,9 +334,10 @@ try:
                     col1, col2 = st.columns([1, 2])
                     with col1:
                         st.subheader(f"{index + 1}. {word}")
-                        # [오디오 재생]
+                        # [오디오 재생] HTML + JS 방식 (초록색 버튼)
                         audio_html = get_audio_html(word)
-                        st.markdown(audio_html, unsafe_allow_html=True)
+                        # 높이를 지정해줘서 레이아웃 깨짐 방지
+                        st.components.v1.html(audio_html, height=40)
                         
                     with col2:
                         st.markdown(f"🇰🇷 **{kor_meaning}**")
