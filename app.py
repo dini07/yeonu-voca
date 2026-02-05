@@ -13,7 +13,7 @@ import json
 
 # --- 1. 기본 설정 ---
 st.set_page_config(page_title="연우의 단어장", page_icon="📖", layout="wide")
-st.title("📖 연우의 영어 단어장")
+st.title("📖 연우의 단어장")
 
 # --- 2. 비밀 정보(Secrets) 가져오기 ---
 # 로컬(내 컴퓨터)과 클라우드(Streamlit Cloud) 환경을 모두 지원하도록 설정
@@ -47,19 +47,31 @@ def get_google_sheet_client():
     return gspread.authorize(creds)
 
 # --- 4. 오디오 생성 ---
-# 서버가 파일을 만드는게 아니라, 브라우저가 직접 재생하는 HTML 코드를 만듭니다.
+# --- [핵심 수정] 4. 오디오 생성 (Base64 임베딩 방식) ---
+# 아이폰 무한 로딩 해결을 위해 오디오 데이터를 페이지 안에 직접 심습니다.
+@st.cache_data(show_spinner=False)
 def get_audio_html(word):
-    # 구글 번역기의 숨겨진 음성 API 주소 (클라이언트 사이드 재생)
-    audio_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={word}&tl=en&client=tw-ob"
-    
-    # HTML audio 태그 생성
-    html_code = f"""
-        <audio controls style="width: 100%;">
-            <source src="{audio_url}" type="audio/mpeg">
-            Your browser does not support the audio element.
-        </audio>
-    """
-    return html_code
+    try:
+        # 1. 서버에서 gTTS로 오디오 데이터 생성
+        tts = gTTS(text=word, lang='en')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        
+        # 2. 오디오 데이터를 텍스트(Base64)로 변환
+        # 이렇게 하면 '파일 다운로드' 과정이 없어져서 아이폰에서도 바로 재생됩니다.
+        b64 = base64.b64encode(fp.read()).decode()
+        
+        # 3. HTML 태그에 직접 데이터 삽입
+        html_code = f"""
+            <audio controls style="width: 100%;">
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                지원하지 않는 브라우저입니다.
+            </audio>
+        """
+        return html_code
+    except Exception as e:
+        return f"🔊 오디오 오류"
 
 # --- 5. 영영사전 데이터 ---
 @st.cache_data(show_spinner=False)
@@ -311,10 +323,10 @@ try:
                     col1, col2 = st.columns([1, 2])
                     with col1:
                         st.subheader(f"{index + 1}. {word}")
-                        
+                        # [오디오 재생]
                         audio_html = get_audio_html(word)
-                        # if audio: st.audio(audio, format='audio/mp3')
                         st.markdown(audio_html, unsafe_allow_html=True)
+                        
                     with col2:
                         st.markdown(f"🇰🇷 **{kor_meaning}**")
                         
