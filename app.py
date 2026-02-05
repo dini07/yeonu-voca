@@ -9,25 +9,44 @@ from fpdf import FPDF
 import random
 import time
 import google.generativeai as genai
-import json # [NEW] JSON 처리를 위한 모듈 추가
-
-# ==========================================
-# 👇 [필수] API 키 입력
-GEMINI_API_KEY = "AIzaSyAfXO1BT9fz9Au-WkaMEPWIDIOhFbJ2pF4"
-# ==========================================
+import json
 
 # --- 1. 기본 설정 ---
 st.set_page_config(page_title="연우의 단어장", page_icon="📖", layout="wide")
 st.title("📖 연우의 영어 단어장")
 
-# --- 2. 구글 시트 연결 ---
+# --- 2. 비밀 정보(Secrets) 가져오기 ---
+# 로컬(내 컴퓨터)과 클라우드(Streamlit Cloud) 환경을 모두 지원하도록 설정
+GEMINI_API_KEY = None
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except FileNotFoundError:
+    # 로컬 테스트용: secrets.toml 파일이 없으면 코드에 적힌 키 사용 (테스트 할 때만 사용하세요)
+    # GitHub에 올릴 때는 이 부분을 비워두거나 주의해야 합니다.
+    GEMINI_API_KEY = "AIzaSyAfXO1BT9fz9Au-WkaMEPWIDIOhFbJ2pF4" 
+
+# --- 3. 구글 시트 연결 (보안 강화) ---
 @st.cache_resource
 def get_google_sheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
+    
+    # 1. Streamlit Cloud 배포 환경 (Secrets 사용)
+    if "gcp_service_account" in st.secrets:
+        creds_dict = st.secrets["gcp_service_account"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    
+    # 2. 내 컴퓨터 로컬 환경 (파일 사용)
+    else:
+        try:
+            creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
+        except:
+            st.error("❌ 'service_account.json' 파일을 찾을 수 없거나 Secrets 설정이 안 되어 있습니다.")
+            return None
+            
     return gspread.authorize(creds)
 
-# --- 3. 오디오 생성 ---
+# --- 4. 오디오 생성 ---
 @st.cache_data(show_spinner=False)
 def get_audio_bytes(word):
     try:
@@ -38,7 +57,7 @@ def get_audio_bytes(word):
         return fp
     except: return None
 
-# --- 4. 영영사전 데이터 ---
+# --- 5. 영영사전 데이터 ---
 @st.cache_data(show_spinner=False)
 def get_dictionary_data(word):
     clean_word = word.strip().lower()
@@ -57,28 +76,26 @@ def get_dictionary_data(word):
         else: return None, None
     except: return None, None
 
-# --- 5. Gemini 설정 및 생성 (배치 처리로 변경) ---
+# --- 6. Gemini 설정 (모델 2.5 고정) ---
 def get_gemini_model():
     if not GEMINI_API_KEY: return None
     try:
-                # 1순위: 최신 플래시 모델
+        genai.configure(api_key=GEMINI_API_KEY)
         return genai.GenerativeModel('gemini-2.5-flash')
     except:
         try:
-            # 2순위: 구버전 프로 모델 (혹시 플래시가 안되면 이거라도)
             return genai.GenerativeModel('gemini-2.5-pro')
         except:
             return None
 
-# [NEW] 10개씩 묶어서 질문하는 함수
 def generate_ai_tips_batch(word_list):
     """
-    word_list 예시: [{'word': 'apple', 'meaning': '사과'}, {'word': 'run', 'meaning': '달리다'} ...]
+    10개씩 묶어서 질문하고 JSON으로 결과를 받는 함수
     """
     model = get_gemini_model()
     if not model: return {}
 
-    # 질문할 단어 목록을 텍스트로 변환
+    # 질문할 단어 목록 텍스트 변환
     words_str = ""
     for item in word_list:
         words_str += f"- {item['word']} (뜻: {item['meaning']})\n"
@@ -108,29 +125,28 @@ def generate_ai_tips_batch(word_list):
         }}
         """
         
-        # API 호출
         response = model.generate_content(prompt)
         text_response = response.text.strip()
         
-        # 혹시 ```json ... ``` 같은 마크다운이 붙어있으면 제거
+        # 마크다운 제거
         if text_response.startswith("```json"):
             text_response = text_response.replace("```json", "").replace("```", "")
         
-        # JSON 문자열을 파이썬 딕셔너리로 변환
         result_dict = json.loads(text_response)
         return result_dict
 
     except Exception as e:
         print(f"AI Batch Error: {e}")
-        return {} # 실패하면 빈 딕셔너리 반환
+        return {} 
 
-# --- 6. PDF 생성 ---
+# --- 7. PDF 생성 ---
 def create_quiz_pdf(df, week_name):
     pdf = FPDF()
+    # [중요] 폰트 파일이 같은 폴더에 있어야 함
     font_path = "NanumGothic-Bold.ttf"
     try: pdf.add_font("NanumGothic", style="", fname=font_path)
     except: 
-        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요!")
+        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요! GitHub에 같이 올렸는지 확인해주세요.")
         return None
 
     pdf.set_font("NanumGothic", size=12)
@@ -187,10 +203,13 @@ def create_quiz_pdf(df, week_name):
 # --- 메인 로직 ---
 try:
     client = get_google_sheet_client()
+    if not client: st.stop() # 연결 실패 시 중단
+    
     spreadsheet_name = "GLP_words"
     doc = client.open(spreadsheet_name)
 except Exception as e:
     st.error(f"구글 시트 연결 실패: {e}")
+    st.info("💡 팁: 로컬에서는 'service_account.json' 파일이 필요하고, Streamlit Cloud에서는 Secrets 설정이 필요합니다.")
     st.stop()
 
 with st.sidebar:
@@ -200,19 +219,6 @@ with st.sidebar:
         selected_tab = st.selectbox("주차 선택", worksheets)
         st.markdown("---")
         st.markdown("**Created for Yeonu.ko.**")
-        
-        st.markdown("---")
-        # 모델 확인용 버튼
-        if st.button("🤖 내 모델 목록 확인"):
-            try:
-                genai.configure(api_key=GEMINI_API_KEY)
-                st.write("사용 가능한 모델:")
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods:
-                        st.code(m.name)
-            except Exception as e:
-                st.error(f"목록 확인 실패: {e}")
-
     except: st.stop()
 
 try:
@@ -230,23 +236,20 @@ try:
         tab1, tab2 = st.tabs(["📚 단어 공부하기", "🖨️ 시험지 만들기"])
 
         with tab1:
-            # === [수정됨] 10개씩 묶어서 처리하는 로직 ===
+            # === AI 꿀팁 생성 버튼 ===
             if st.button("✨ AI 쌤에게 꿀팁 채워달라고 하기 (빈칸만)"):
-                if not GEMINI_API_KEY:
-                    st.error("⚠️ API 키가 없어요.")
+                if not GEMINI_API_KEY or "API_키" in GEMINI_API_KEY:
+                    st.error("⚠️ API 키가 설정되지 않았습니다. (Secrets 설정을 확인하세요)")
                 else:
                     progress_bar = st.progress(0, text="작업 대상을 찾고 있어요...")
                     
-                    # 1. 작업해야 할 빈칸(Target) 찾기
                     target_rows = []
                     for index, row in df.iterrows():
                         raw_context = row.get('Context', '')
                         current_context = str(raw_context).strip()
-                        
-                        # 내용이 없거나 'nan'인 경우만 리스트에 추가
                         if not current_context or current_context.lower() == 'nan':
                             target_rows.append({
-                                'index': index, # 데이터프레임 인덱스
+                                'index': index,
                                 'word': row['Word'],
                                 'meaning': row['Meaning']
                             })
@@ -256,28 +259,21 @@ try:
                     else:
                         st.info(f"총 {len(target_rows)}개의 단어에 설명을 채울 예정입니다. (10개씩 묶어서 처리)")
                         
-                        # 2. 10개씩 잘라서(Chunk) 처리하기
                         batch_size = 10
                         total_processed = 0
                         
                         for i in range(0, len(target_rows), batch_size):
-                            # 이번에 처리할 묶음 (최대 10개)
                             batch = target_rows[i : i + batch_size]
-                            
                             progress_bar.progress((i) / len(target_rows), text=f"AI가 {i+1}~{i+len(batch)}번째 단어를 생각 중입니다...")
                             
-                            # AI에게 묶음 질문 던지기
-                            # word_list만 뽑아서 전달
                             batch_response = generate_ai_tips_batch(batch)
                             
-                            # 응답받은 내용을 시트에 쓰기
                             for item in batch:
                                 word_key = item['word']
-                                # AI 응답에 해당 단어가 있으면 저장
                                 if word_key in batch_response:
                                     explanation = batch_response[word_key]
                                     try:
-                                        # 구글 시트 D열(4번째)에 업데이트
+                                        # D열(4번째)에 업데이트
                                         sheet.update_cell(item['index'] + 2, 4, explanation)
                                         total_processed += 1
                                     except Exception as e:
@@ -285,7 +281,6 @@ try:
                                 else:
                                     print(f"AI 응답 누락: {word_key}")
                             
-                            # 묶음 처리 후 1초 휴식 (너무 빠르면 차단될 수 있음)
                             time.sleep(1)
 
                         progress_bar.empty()
