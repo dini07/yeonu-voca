@@ -275,8 +275,6 @@ try:
         context_col_index = header_row.index("Context") + 1
     else:
         context_col_index = None
-    else:
-        context_col_index = None
 
     if df.empty:
         st.warning("단어가 없어요!")
