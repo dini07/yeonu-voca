@@ -251,11 +251,30 @@ try:
     header_row = sheet.row_values(1)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
-    
-    df = df.fillna("") 
-    if 'Context' not in df.columns: df['Context'] = ""
+    df = df.fillna("")
+
+    # --- 컬럼명 정규화 (시트마다 헤더가 다를 수 있음) ---
+    col_map = {}
+    if "Word" in df.columns:
+        col_map["Word"] = "Word"
+    elif "World" in df.columns:  # 오타 대응
+        col_map["World"] = "Word"
+
+    if "Meaning" in df.columns:
+        col_map["Meaning"] = "Meaning"
+    elif "Meaning_ko" in df.columns:
+        col_map["Meaning_ko"] = "Meaning"
+
+    if col_map:
+        df = df.rename(columns=col_map)
+
+    if 'Context' not in df.columns:
+        df['Context'] = ""
+
     if "Context" in header_row:
         context_col_index = header_row.index("Context") + 1
+    else:
+        context_col_index = None
     else:
         context_col_index = None
 
