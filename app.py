@@ -200,7 +200,8 @@ def create_quiz_pdf(df, week_name, items_per_set=10):
         return None
 
     try:
-        pdf.add_font("NanumGothic", style="", fname=str(font_path))
+        # pyfpdf requires uni=True for TTF; fpdf2 accepts it (deprecated) for compatibility
+        pdf.add_font("NanumGothic", style="", fname=str(font_path), uni=True)
     except Exception as e:
         st.error(f"⚠️ 폰트 로드 실패: {e}")
         st.caption(f"폰트 경로: {font_path}")

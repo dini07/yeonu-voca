@@ -4,5 +4,5 @@ oauth2client
 pandas
 gTTS
 requests
-fpdf
+fpdf2==2.8.5
 google-generativeai
