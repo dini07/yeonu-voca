@@ -157,11 +157,21 @@ def generate_ai_tips_batch(word_list):
 def create_quiz_pdf(df, week_name, items_per_set=10):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=10)
-    font_path = Path(__file__).resolve().parent / "NanumGothic-Bold.ttf"
+    font_candidates = [
+        Path(__file__).resolve().parent / "NanumGothic-Bold.ttf",
+        Path.cwd() / "NanumGothic-Bold.ttf",
+    ]
+    font_path = next((p for p in font_candidates if p.exists()), None)
+    if not font_path:
+        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요!")
+        st.caption(f"찾은 경로: {', '.join(str(p) for p in font_candidates)}")
+        return None
+
     try:
         pdf.add_font("NanumGothic", style="", fname=str(font_path))
-    except: 
-        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요!")
+    except Exception as e:
+        st.error(f"⚠️ 폰트 로드 실패: {e}")
+        st.caption(f"폰트 경로: {font_path}")
         return None
 
     pdf.set_font("NanumGothic", size=12)
