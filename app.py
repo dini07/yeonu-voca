@@ -6,6 +6,8 @@ import pandas as pd
 import io
 import requests
 from fpdf import FPDF
+import math
+from pathlib import Path
 import random
 import time
 import google.generativeai as genai
@@ -152,17 +154,31 @@ def generate_ai_tips_batch(word_list):
         return {} 
 
 # --- 7. PDF 생성 ---
-def create_quiz_pdf(df, week_name):
+def create_quiz_pdf(df, week_name, items_per_set=10):
     pdf = FPDF()
-    font_path = "NanumGothic-Bold.ttf"
-    try: pdf.add_font("NanumGothic", style="", fname=font_path)
+    pdf.set_auto_page_break(auto=True, margin=10)
+    font_path = Path(__file__).resolve().parent / "NanumGothic-Bold.ttf"
+    try:
+        pdf.add_font("NanumGothic", style="", fname=str(font_path))
     except: 
         st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요!")
         return None
 
     pdf.set_font("NanumGothic", size=12)
 
-    for i in range(1, 6):
+    total_words = len(df)
+    if total_words == 0:
+        return None
+
+    set_count = max(1, math.ceil(total_words / items_per_set))
+
+    for i in range(1, set_count + 1):
+        set_start = (i - 1) * items_per_set
+        set_end = i * items_per_set
+        set_df = df.iloc[set_start:set_end]
+        if set_df.empty:
+            continue
+
         pdf.add_page()
         pdf.set_font("NanumGothic", size=16)
         pdf.cell(0, 15, f"영어 단어 테스트 - {week_name} (Set {i})", align="C", new_x="LMARGIN", new_y="NEXT")
@@ -170,7 +186,7 @@ def create_quiz_pdf(df, week_name):
         pdf.cell(0, 10, f"이름: ____________________   점수: ___________", align="R", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(5)
 
-        shuffled_df = df.sample(frac=1).reset_index(drop=True)
+        shuffled_df = set_df.sample(frac=1).reset_index(drop=True)
         pdf.set_font("NanumGothic", size=11)
         pdf.set_fill_color(240, 240, 240)
         pdf.cell(15, 10, "No.", border=1, align="C", fill=True)
@@ -232,11 +248,16 @@ with st.sidebar:
 
 try:
     sheet = doc.worksheet(selected_tab)
+    header_row = sheet.row_values(1)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     
     df = df.fillna("") 
     if 'Context' not in df.columns: df['Context'] = ""
+    if "Context" in header_row:
+        context_col_index = header_row.index("Context") + 1
+    else:
+        context_col_index = None
 
     if df.empty:
         st.warning("단어가 없어요!")
@@ -248,6 +269,8 @@ try:
             if st.button("✨ AI 쌤에게 꿀팁 채워달라고 하기 (빈칸만)"):
                 if not GEMINI_API_KEY or "API_키" in GEMINI_API_KEY:
                     st.error("⚠️ API 키가 설정되지 않았습니다.")
+                elif context_col_index is None:
+                    st.error("⚠️ 시트에 'Context' 헤더가 없습니다. 헤더를 추가한 뒤 다시 시도하세요.")
                 else:
                     progress_bar = st.progress(0, text="작업 대상을 찾고 있어요...")
                     target_rows = []
@@ -275,9 +298,18 @@ try:
                             batch_response = generate_ai_tips_batch(batch)
                             
                             for item in batch:
-                                if item['word'] in batch_response:
+                                # 모델이 대소문자를 다르게 반환할 수 있으니 소문자로 매칭
+                                key = item['word'].strip().lower()
+                                matched = None
+                                if key in batch_response:
+                                    matched = batch_response[key]
+                                else:
+                                    # 원문 키도 함께 시도
+                                    if item['word'] in batch_response:
+                                        matched = batch_response[item['word']]
+                                if matched:
                                     try:
-                                        sheet.update_cell(item['index'] + 2, 4, batch_response[item['word']])
+                                        sheet.update_cell(item['index'] + 2, context_col_index, matched)
                                         total_processed += 1
                                     except Exception as e:
                                         print(f"저장 실패: {e}")
