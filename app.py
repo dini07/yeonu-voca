@@ -8,6 +8,7 @@ import requests
 from fpdf import FPDF
 import math
 from pathlib import Path
+import tempfile
 import random
 import time
 import google.generativeai as genai
@@ -154,17 +155,48 @@ def generate_ai_tips_batch(word_list):
         return {} 
 
 # --- 7. PDF 생성 ---
-def create_quiz_pdf(df, week_name, items_per_set=10):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=10)
-    font_candidates = [
+FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Bold.ttf"
+
+
+def _is_valid_ttf(path: Path) -> bool:
+    try:
+        header = path.read_bytes()[:4]
+        return header in (b"\x00\x01\x00\x00", b"OTTO", b"ttcf")
+    except Exception:
+        return False
+
+
+@st.cache_resource
+def _get_font_path():
+    candidates = [
         Path(__file__).resolve().parent / "NanumGothic-Bold.ttf",
         Path.cwd() / "NanumGothic-Bold.ttf",
     ]
-    font_path = next((p for p in font_candidates if p.exists()), None)
+    for p in candidates:
+        if p.exists() and _is_valid_ttf(p):
+            return p, None
+
+    # Fallback: download a fresh copy (handles corrupted or partial files in deployment)
+    try:
+        resp = requests.get(FONT_URL, timeout=10)
+        resp.raise_for_status()
+        tmp_path = Path(tempfile.gettempdir()) / "NanumGothic-Bold.ttf"
+        tmp_path.write_bytes(resp.content)
+        if _is_valid_ttf(tmp_path):
+            return tmp_path, None
+        return None, "다운로드한 폰트가 유효한 TTF가 아닙니다."
+    except Exception as e:
+        return None, f"폰트 다운로드 실패: {e}"
+
+
+def create_quiz_pdf(df, week_name, items_per_set=10):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=10)
+    font_path, font_err = _get_font_path()
     if not font_path:
-        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일이 폴더에 없어요!")
-        st.caption(f"찾은 경로: {', '.join(str(p) for p in font_candidates)}")
+        st.error("⚠️ 'NanumGothic-Bold.ttf' 폰트 파일을 찾거나 다운로드하지 못했습니다.")
+        if font_err:
+            st.caption(font_err)
         return None
 
     try:
