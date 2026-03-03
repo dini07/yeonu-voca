@@ -328,7 +328,8 @@ with st.sidebar:
     st.header("🗂 학습 메뉴")
     try:
         worksheets = [ws.title for ws in doc.worksheets()]
-        selected_tab = st.selectbox("주차 선택", worksheets)
+        worksheets = list(reversed(worksheets))
+        selected_tab = st.selectbox("주차 선택", worksheets, index=0)
         st.markdown("---")
         st.markdown("**Created for Yeonu.ko.**")
     except: st.stop()
