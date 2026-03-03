@@ -112,7 +112,8 @@ def get_gemini_model():
 
 def generate_ai_tips_batch(word_list):
     model = get_gemini_model()
-    if not model: return {}
+    if not model:
+        return {}, "Gemini 모델 초기화 실패(API 키 확인 필요)", None
 
     words_str = ""
     for item in word_list:
@@ -148,11 +149,11 @@ def generate_ai_tips_batch(word_list):
         if text_response.startswith("```json"):
             text_response = text_response.replace("```json", "").replace("```", "")
         result_dict = json.loads(text_response)
-        return result_dict
+        return result_dict, None, text_response
 
     except Exception as e:
         print(f"AI Batch Error: {e}")
-        return {} 
+        return {}, str(e), locals().get("text_response")
 
 # --- 7. PDF 생성 ---
 FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Bold.ttf"
@@ -371,6 +372,7 @@ try:
 
         with tab1:
             # === AI 꿀팁 생성 버튼 ===
+            debug_ai = st.checkbox("AI 디버그 로그 표시", value=False)
             if st.button("✨ AI 쌤에게 꿀팁 채워달라고 하기 (빈칸만)"):
                 if not GEMINI_API_KEY or "API_키" in GEMINI_API_KEY:
                     st.error("⚠️ API 키가 설정되지 않았습니다.")
@@ -400,7 +402,14 @@ try:
                             batch = target_rows[i : i + batch_size]
                             progress_bar.progress((i) / len(target_rows), text=f"AI가 생각 중... ({i+1}~{i+len(batch)})")
                             
-                            batch_response = generate_ai_tips_batch(batch)
+                            batch_response, batch_error, raw_text = generate_ai_tips_batch(batch)
+                            if batch_error:
+                                st.error(f"AI 오류: {batch_error}")
+                                if debug_ai and raw_text:
+                                    st.code(raw_text[:1000])
+                                # 오류가 나면 다음 배치로 계속 진행
+                                time.sleep(1)
+                                continue
                             
                             for item in batch:
                                 # 모델이 대소문자를 다르게 반환할 수 있으니 소문자로 매칭
@@ -418,6 +427,10 @@ try:
                                         total_processed += 1
                                     except Exception as e:
                                         print(f"저장 실패: {e}")
+                            if debug_ai:
+                                st.caption(
+                                    f"배치 결과: 요청 {len(batch)}개, 응답 {len(batch_response)}개, 저장 {total_processed}개"
+                                )
                             time.sleep(1)
 
                         progress_bar.empty()
