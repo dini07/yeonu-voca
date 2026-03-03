@@ -215,6 +215,12 @@ def create_quiz_pdf(df, week_name, items_per_set=10):
 
     set_count = max(1, math.ceil(total_words / items_per_set))
 
+    # 2단 레이아웃 컬럼 폭 (A4 기준)
+    col_no = 10
+    col_word = 40
+    col_mean = 45
+    col_total = col_no + col_word + col_mean
+
     for i in range(1, set_count + 1):
         set_start = (i - 1) * items_per_set
         set_end = i * items_per_set
@@ -232,18 +238,40 @@ def create_quiz_pdf(df, week_name, items_per_set=10):
         shuffled_df = set_df.sample(frac=1).reset_index(drop=True)
         pdf.set_font("NanumGothic", size=11)
         pdf.set_fill_color(240, 240, 240)
-        pdf.cell(15, 10, "No.", border=1, align="C", fill=True)
-        pdf.cell(80, 10, "Word (영어)", border=1, align="C", fill=True)
-        pdf.cell(95, 10, "Meaning (뜻)", border=1, align="C", fill=True)
+        # 헤더(좌/우 2단)
+        pdf.cell(col_no, 10, "No.", border=1, align="C", fill=True)
+        pdf.cell(col_word, 10, "Word", border=1, align="C", fill=True)
+        pdf.cell(col_mean, 10, "Meaning", border=1, align="C", fill=True)
+        pdf.cell(col_no, 10, "No.", border=1, align="C", fill=True)
+        pdf.cell(col_word, 10, "Word", border=1, align="C", fill=True)
+        pdf.cell(col_mean, 10, "Meaning", border=1, align="C", fill=True)
         pdf.ln()
 
-        for idx, row in shuffled_df.iterrows():
-            word = str(row['Word'])
-            meaning = str(row['Meaning'])
-            quiz_type = random.choice([0, 1])
-            pdf.cell(15, 12, str(idx + 1), border=1, align="C")
-            pdf.cell(80, 12, "" if quiz_type == 0 else word, border=1, align="L")
-            pdf.cell(95, 12, "" if quiz_type == 1 else meaning, border=1, align="L")
+        rows = shuffled_df.reset_index(drop=True)
+        for idx in range(0, len(rows), 2):
+            left = rows.iloc[idx]
+            right = rows.iloc[idx + 1] if idx + 1 < len(rows) else None
+
+            # 왼쪽 항목
+            word_l = str(left['Word'])
+            meaning_l = str(left['Meaning'])
+            quiz_type_l = random.choice([0, 1])
+            pdf.cell(col_no, 12, str(idx + 1), border=1, align="C")
+            pdf.cell(col_word, 12, "" if quiz_type_l == 0 else word_l, border=1, align="L")
+            pdf.cell(col_mean, 12, "" if quiz_type_l == 1 else meaning_l, border=1, align="L")
+
+            # 오른쪽 항목
+            if right is not None:
+                word_r = str(right['Word'])
+                meaning_r = str(right['Meaning'])
+                quiz_type_r = random.choice([0, 1])
+                pdf.cell(col_no, 12, str(idx + 2), border=1, align="C")
+                pdf.cell(col_word, 12, "" if quiz_type_r == 0 else word_r, border=1, align="L")
+                pdf.cell(col_mean, 12, "" if quiz_type_r == 1 else meaning_r, border=1, align="L")
+            else:
+                pdf.cell(col_no, 12, "", border=1, align="C")
+                pdf.cell(col_word, 12, "", border=1, align="L")
+                pdf.cell(col_mean, 12, "", border=1, align="L")
             pdf.ln()
 
     pdf.add_page()
@@ -255,15 +283,31 @@ def create_quiz_pdf(df, week_name, items_per_set=10):
 
     pdf.set_font("NanumGothic", size=11)
     pdf.set_fill_color(220, 230, 240)
-    pdf.cell(15, 10, "No.", border=1, align="C", fill=True)
-    pdf.cell(80, 10, "Word (쓰기)", border=1, align="C", fill=True)
-    pdf.cell(95, 10, "Meaning (뜻)", border=1, align="C", fill=True)
+    pdf.cell(col_no, 10, "No.", border=1, align="C", fill=True)
+    pdf.cell(col_word, 10, "Word", border=1, align="C", fill=True)
+    pdf.cell(col_mean, 10, "Meaning", border=1, align="C", fill=True)
+    pdf.cell(col_no, 10, "No.", border=1, align="C", fill=True)
+    pdf.cell(col_word, 10, "Word", border=1, align="C", fill=True)
+    pdf.cell(col_mean, 10, "Meaning", border=1, align="C", fill=True)
     pdf.ln()
 
-    for idx, row in df.iterrows():
-        pdf.cell(15, 12, str(idx + 1), border=1, align="C")
-        pdf.cell(80, 12, "", border=1, align="L")
-        pdf.cell(95, 12, str(row['Meaning']), border=1, align="L")
+    rows_all = df.reset_index(drop=True)
+    for idx in range(0, len(rows_all), 2):
+        left = rows_all.iloc[idx]
+        right = rows_all.iloc[idx + 1] if idx + 1 < len(rows_all) else None
+
+        pdf.cell(col_no, 12, str(idx + 1), border=1, align="C")
+        pdf.cell(col_word, 12, "", border=1, align="L")
+        pdf.cell(col_mean, 12, str(left['Meaning']), border=1, align="L")
+
+        if right is not None:
+            pdf.cell(col_no, 12, str(idx + 2), border=1, align="C")
+            pdf.cell(col_word, 12, "", border=1, align="L")
+            pdf.cell(col_mean, 12, str(right['Meaning']), border=1, align="L")
+        else:
+            pdf.cell(col_no, 12, "", border=1, align="C")
+            pdf.cell(col_word, 12, "", border=1, align="L")
+            pdf.cell(col_mean, 12, "", border=1, align="L")
         pdf.ln()
 
     return bytes(pdf.output())
